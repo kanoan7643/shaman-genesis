@@ -1,0 +1,97 @@
+<!doctype html>
+<html lang="zh-Hant">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>薩滿紀元 Shaman Genesis</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=Noto+Serif+TC:wght@600;900&family=Noto+Sans+TC:wght@400;700&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="style.css">
+<script type="importmap">
+{ "imports": {
+  "three": "https://cdn.jsdelivr.net/npm/three@0.165.0/build/three.module.js",
+  "three/addons/": "https://cdn.jsdelivr.net/npm/three@0.165.0/examples/jsm/"
+} }
+</script>
+</head>
+<body>
+<div id="game">
+  <canvas id="view"></canvas>
+  <canvas id="overlay"></canvas>
+
+  <div id="hud" class="hidden">
+    <div id="topbar">
+      <div class="res mana"><span class="ico">🔮</span><div class="bar"><div id="manaFill"></div><span id="manaText">0</span></div></div>
+      <div class="res"><span class="ico">🪵</span><b id="wood">0</b><small>木材</small></div>
+      <div class="res"><span class="ico">👥</span><b id="pop">0</b><small>子民</small></div>
+      <div class="res"><span class="ico">⏳</span><b id="clock">0:00</b></div>
+      <div class="res enemy"><span class="ico">🔥</span><b id="enemyPop">0</b><small>敵軍</small></div>
+      <button id="btnMenu" title="選單 (Esc)">☰</button>
+    </div>
+    <div id="log"></div>
+    <div id="banner"></div>
+
+    <div id="bottom">
+      <canvas id="minimap" width="440" height="440"></canvas>
+      <div id="spells"></div>
+      <div id="panel">
+        <div id="selInfo"></div>
+        <div id="actions"></div>
+      </div>
+    </div>
+    <div id="tooltip"></div>
+  </div>
+
+  <div id="start" class="screen">
+    <div class="card">
+      <h1>薩滿紀元<small>SHAMAN GENESIS</small></h1>
+      <p class="lead">帶領你的部族，以子民的信仰換取神力。<br>操縱薩滿施放天災，擊潰赤焰部族！</p>
+      <div class="opts">
+        <div class="opt"><label>難度</label>
+          <div class="seg" id="diffSeg">
+            <button data-v="easy">簡單</button><button data-v="normal" class="on">普通</button><button data-v="hard">困難</button>
+          </div></div>
+        <div class="opt"><label>畫質</label>
+          <div class="seg" id="qualSeg">
+            <button data-v="ultra" class="on">極致高清</button><button data-v="high">高</button><button data-v="perf">效能</button>
+          </div></div>
+      </div>
+      <button id="btnStart" class="big">開始征戰</button>
+      <details>
+        <summary>操作說明</summary>
+        <div class="help">
+          <p><b>鏡頭</b>：WASD / 方向鍵 / 滑鼠移到畫面邊緣 平移 · Q/E 或 中鍵拖曳 旋轉 · 滾輪縮放</p>
+          <p><b>選取</b>：左鍵點選 / 拖曳框選 · Shift 加選 · 空白鍵 選取薩滿 · F 選所有戰士 · Ctrl+A 全選部隊</p>
+          <p><b>指令</b>：右鍵地面 移動 · 右鍵敵人 攻擊 · 右鍵樹 伐木 · 右鍵工地 建造 · 右鍵 <b>石像 / 圖騰 祈禱</b> · 右鍵訓練所 送勇者受訓</p>
+          <p><b>法術</b>：選取薩滿後按 1–7 或點法術按鈕，再左鍵點目標施放（右鍵取消）</p>
+          <p><b>信仰</b>：子民在 <b>靈魂圖騰</b> 祈禱會累積法力；在 <b>石像</b> 祈禱可解鎖新法術。孤島上的石像需要「陸橋」才能抵達。</p>
+          <p><b>建造</b>：B 小屋（增加人口並生產勇者）· V 戰士訓練所 · G 讓選取的勇者回歸自動工作</p>
+          <p><b>勝利</b>：消滅敵方所有子民與房屋。</p>
+        </div>
+      </details>
+    </div>
+  </div>
+
+  <div id="pause" class="screen hidden">
+    <div class="card small">
+      <h2>暫停</h2>
+      <button id="btnResume" class="big">繼續</button>
+      <button id="btnRestart">重新開始</button>
+      <label class="chk"><input type="checkbox" id="chkSound" checked> 音效</label>
+      <label class="chk"><input type="checkbox" id="chkEdge" checked> 邊緣捲動</label>
+    </div>
+  </div>
+
+  <div id="end" class="screen hidden">
+    <div class="card small">
+      <h2 id="endTitle">勝利</h2>
+      <p id="endText"></p>
+      <button id="btnAgain" class="big">再戰一局</button>
+    </div>
+  </div>
+
+  <div id="loading" class="screen"><div class="spinner"></div><p>正在創造世界…</p></div>
+</div>
+<script type="module" src="src/main.js"></script>
+</body>
+</html>
