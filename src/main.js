@@ -58,6 +58,7 @@ function applyQuality() {
 }
 function resize() {
   const w = window.innerWidth, h = window.innerHeight;
+  if (w < 2 || h < 2) return; // 視窗隱藏時避免建立零尺寸緩衝區
   renderer.setSize(w, h, false);
   camera.aspect = w / h; camera.updateProjectionMatrix();
   if (composer) { composer.setPixelRatio(renderer.getPixelRatio()); composer.setSize(w, h); }
