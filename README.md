@@ -2,6 +2,8 @@
 
 致敬《上帝也瘋狂：開天闢地》(Populous: The Beginning) 的 3D 即時策略遊戲，使用 Three.js (WebGL) 製作，可直接在瀏覽器執行。
 
+### 🎮 [立即線上遊玩](https://kanoan7643.github.io/shaman-genesis/)
+
 操縱你的 **薩滿** 與部下，讓子民 **向神祈禱** 以換取法力與新法術，並用天災擊潰敵對的赤焰部族。
 
 ## 特色
@@ -17,7 +19,9 @@
 
 ## 執行
 
-需要透過本機伺服器開啟（ES 模組無法在 `file://` 直接載入）：
+最簡單的方式是直接開啟線上版：<https://kanoan7643.github.io/shaman-genesis/>
+
+若要在本機執行，需要透過本機伺服器開啟（ES 模組無法在 `file://` 直接載入）：
 
 ```bash
 python -m http.server 8000
