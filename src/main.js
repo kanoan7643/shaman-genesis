@@ -450,10 +450,10 @@ window.addEventListener('keydown', (e) => {
   if (sp) { enterCast(sp); return; }
   const tab = !e.ctrlKey && UNIT_TABS.find((t) => UNIT_STATS[t].tab.key === k);
   if (tab) { selectTab(tab, e.shiftKey); return; }
-  if (k === 'x' && !e.ctrlKey) { selectIdle(e.shiftKey); return; }
+  if (k === 'v' && !e.ctrlKey) { selectIdle(e.shiftKey); return; }
   if (k === ' ') { e.preventDefault(); selectShaman(); }
   else if (k === 'b') enterBuild('hut');
-  else if (k === 'v') enterBuild('warriorhut');
+  else if (k === 'n') enterBuild('warriorhut');
   else if (k === 'g') autoWork();
   else if (k === 't') prayAtTotem();
   else if (k === 'h') stopSel();
@@ -526,9 +526,9 @@ for (const type of UNIT_TABS) {
 }
 const idleBtn = document.createElement('button');
 idleBtn.className = 'utab idle';
-idleBtn.innerHTML = `<span class="hk">X</span><span class="ic">💤</span><span class="nm">閒置勇者</span><b class="n">0</b>`;
+idleBtn.innerHTML = `<span class="hk">V</span><span class="ic">💤</span><span class="nm">閒置勇者</span><b class="n">0</b>`;
 idleBtn.onclick = (e) => { audio.init(); selectIdle(e.shiftKey); };
-idleBtn.onmouseenter = () => showTip(idleBtn, () => '<b>💤 閒置勇者</b>（X）<br>勇者平常會自動伐木、建造；下過手動指令（移動、祈禱結束等）或附近沒樹可砍時會閒置。<br>選取後按 G 讓他們回去自動工作 · 連按兩下移動鏡頭');
+idleBtn.onmouseenter = () => showTip(idleBtn, () => '<b>💤 閒置勇者</b>（V）<br>勇者平常會自動伐木、建造；下過手動指令（移動、祈禱結束等）或附近沒樹可砍時會閒置。<br>選取後按 G 讓他們回去自動工作 · 連按兩下移動鏡頭');
 idleBtn.onmouseleave = hideTip;
 tabBox.appendChild(idleBtn);
 const tip = $('tooltip');
@@ -587,7 +587,7 @@ function buildPanel() {
       info = `<h3>${o.tribe === 2 ? '野人' : '敵方 ' + UNIT_STATS[o.type].name}</h3>${hpBar(o)}${o.tribe === 2 ? '使用「感化」將他們轉化為子民' : ''}`;
     }
   } else {
-    info = `<h3>${LAYOUT.icon} ${LAYOUT.name}</h3><small>拖曳框選子民 · Z/X/C 分頁選取兵種<br>在石像祈禱 → 解鎖法術、補充次數；在圖騰祈禱 → 補充全部</small>`;
+    info = `<h3>${LAYOUT.icon} ${LAYOUT.name}</h3><small>拖曳框選子民 · Z 薩滿 · X 戰士 · V 閒置勇者<br>在石像祈禱 → 解鎖法術、補充次數；在圖騰祈禱 → 補充全部</small>`;
   }
   if (sel.length) {
     const hasF = sel.some((u) => u.isFollower), hasB = sel.some((u) => u.type === 'brave');
@@ -596,7 +596,7 @@ function buildPanel() {
     acts.push(act('✋ 停止', '(H)', stopSel, false));
   }
   acts.push(act('🛖 小屋', `${BUILD.hut.wood} 木 (B)`, () => enterBuild('hut'), tr.wood < BUILD.hut.wood, '增加人口上限 6，並定期產生勇者'));
-  acts.push(act('⚔ 訓練所', `${BUILD.warriorhut.wood} 木 (V)`, () => enterBuild('warriorhut'), tr.wood < BUILD.warriorhut.wood, '把勇者訓練成強壯的戰士'));
+  acts.push(act('⚔ 訓練所', `${BUILD.warriorhut.wood} 木 (N)`, () => enterBuild('warriorhut'), tr.wood < BUILD.warriorhut.wood, '把勇者訓練成強壯的戰士'));
   if (!(selObj && selObj.type === 'warriorhut') && game.buildings.some((b) => b.alive && b.tribe === 0 && b.type === 'warriorhut' && b.complete))
     acts.push(act('🗡 訓練戰士', `${TRAIN_COST} 木 (R)`, trainWarrior, tr.wood < TRAIN_COST));
   $('selInfo').innerHTML = info;
@@ -996,7 +996,7 @@ function startGame() {
   game.fog.update(0, game, true);
   game.msg(`${LAYOUT.icon} ${LAYOUT.name}——歡迎，${game.tribes[0].name} 的薩滿！`, '#ffe28a');
   game.msg('法術有使用次數：選取子民右鍵該法術的「石像」祈禱來補充', '#bfe0ff');
-  game.msg('右鍵尚未解鎖的石像祈禱可獲得新法術 · Z/X/C 快速選取兵種', '#bfe0ff');
+  game.msg('右鍵尚未解鎖的石像祈禱可獲得新法術 · Z 薩滿 / X 戰士 / V 閒置勇者', '#bfe0ff');
   selectShaman();
   last = performance.now();
 }
