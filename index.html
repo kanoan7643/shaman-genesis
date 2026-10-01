@@ -21,7 +21,7 @@
 
   <div id="hud" class="hidden">
     <div id="topbar">
-      <div class="res mana"><span class="ico">🔮</span><div class="bar"><div id="manaFill"></div><span id="manaText">0</span></div></div>
+      <div class="res"><span class="ico">🙏</span><b id="prayers">0</b><small>祈禱中</small></div>
       <div class="res"><span class="ico">🪵</span><b id="wood">0</b><small>木材</small></div>
       <div class="res"><span class="ico">👥</span><b id="pop">0</b><small>子民</small></div>
       <div class="res"><span class="ico">⏳</span><b id="clock">0:00</b></div>
@@ -33,7 +33,10 @@
 
     <div id="bottom">
       <canvas id="minimap" width="440" height="440"></canvas>
-      <div id="spells"></div>
+      <div id="center">
+        <div id="unitTabs"></div>
+        <div id="spells"></div>
+      </div>
       <div id="panel">
         <div id="selInfo"></div>
         <div id="actions"></div>
@@ -47,6 +50,10 @@
       <h1>薩滿紀元<small>SHAMAN GENESIS</small></h1>
       <p class="lead">帶領你的部族，以子民的信仰換取神力。<br>操縱薩滿施放天災，擊潰赤焰部族！</p>
       <div class="opts">
+        <div class="opt col"><label>關卡</label>
+          <div id="levels"></div>
+          <p id="levelDesc"></p>
+        </div>
         <div class="opt"><label>難度</label>
           <div class="seg" id="diffSeg">
             <button data-v="easy">簡單</button><button data-v="normal" class="on">普通</button><button data-v="hard">困難</button>
@@ -61,11 +68,13 @@
         <summary>操作說明</summary>
         <div class="help">
           <p><b>鏡頭</b>：WASD / 方向鍵 / 滑鼠移到畫面邊緣 平移 · Q/E 或 中鍵拖曳 旋轉 · 滾輪縮放</p>
-          <p><b>選取</b>：左鍵點選 / 拖曳框選 · Shift 加選 · 空白鍵 選取薩滿 · F 選所有戰士 · Ctrl+A 全選部隊</p>
+          <p><b>選取</b>：左鍵點選 / 拖曳框選 · Shift 加選 · 雙擊選同類 · Ctrl+A 全選部隊</p>
+          <p><b>兵種分頁</b>：Z 薩滿（或空白鍵）· X 勇者 · C 戰士 · 連按兩下鏡頭移到該部隊 · Shift 加選</p>
           <p><b>指令</b>：右鍵地面 移動 · 右鍵敵人 攻擊 · 右鍵樹 伐木 · 右鍵工地 建造 · 右鍵 <b>石像 / 圖騰 祈禱</b> · 右鍵訓練所 送勇者受訓</p>
-          <p><b>法術</b>：選取薩滿後按 1–7 或點法術按鈕，再左鍵點目標施放（右鍵取消）</p>
-          <p><b>信仰</b>：子民在 <b>靈魂圖騰</b> 祈禱會累積法力；在 <b>石像</b> 祈禱可解鎖新法術。孤島上的石像需要「陸橋」才能抵達。</p>
-          <p><b>建造</b>：B 小屋（增加人口並生產勇者）· V 戰士訓練所 · G 讓選取的勇者回歸自動工作</p>
+          <p><b>法術</b>：按 1–7 或點法術按鈕，再左鍵點目標施放（Shift 連續施放，右鍵取消）</p>
+          <p><b>彈藥</b>：每個法術有使用次數，越強的法術次數越少。子民在該法術的 <b>石像</b> 祈禱可補充次數，在 <b>靈魂圖騰</b> 祈禱則平均補充所有法術；祈禱的人越多越快，越強的法術需要越久。</p>
+          <p><b>解鎖</b>：在尚未擁有的法術石像祈禱即可解鎖。孤島上的石像需要「陸橋」才能抵達。</p>
+          <p><b>建造</b>：B 小屋（增加人口並生產勇者）· V 戰士訓練所 · R 訓練戰士 · G 自動工作 · T 圖騰祈禱 · H 停止 · Home 鏡頭回圖騰</p>
           <p><b>勝利</b>：消滅敵方所有子民與房屋。</p>
         </div>
       </details>
@@ -86,7 +95,8 @@
     <div class="card small">
       <h2 id="endTitle">勝利</h2>
       <p id="endText"></p>
-      <button id="btnAgain" class="big">再戰一局</button>
+      <button id="btnNext" class="big hidden">下一關</button>
+      <button id="btnAgain">再戰一局</button>
     </div>
   </div>
 

@@ -1,6 +1,6 @@
 // 遊戲世界邏輯
 import * as THREE from 'three';
-import { LAYOUT, START_SPELLS, BUILD, SPELLS, TRIBE_NAMES, TRIBE_CSS, MANA_MAX, WATER, HALF } from './config.js';
+import { LAYOUT, BUILD, SPELLS, SPELL_ORDER, TRIBE_NAMES, TRIBE_CSS, WATER, HALF } from './config.js';
 import { Terrain } from './terrain.js';
 import { Forest, mat } from './models.js';
 import { Unit, Building, StoneHead } from './entities.js';
@@ -23,19 +23,24 @@ export class Game {
     this.terrain = new Terrain(scene, opts.seed);
     this.fx = new FX(scene);
     this.forest = new Forest(scene);
-    const d = opts.diff;
-    this.tribes = [0, 1, 2].map((i) => ({
-      id: i, name: TRIBE_NAMES[i], css: TRIBE_CSS[i], mana: 45, wood: 35,
-      unlocked: new Set(i < 2 ? START_SPELLS : []), shaman: null, totem: null, respawnT: 0, defeated: false,
-      manaMul: i === 1 ? d.mana : 1, econ: i === 1 ? d.econ : 1, kills: 0,
-    }));
+    const d = opts.diff, st = LAYOUT.start;
+    this.tribes = [0, 1, 2].map((i) => {
+      const tr = {
+        id: i, name: TRIBE_NAMES[i], css: TRIBE_CSS[i], wood: st.wood[i] ?? 35,
+        unlocked: new Set(i < 2 ? st.spells[i] : []), shaman: null, totem: null, respawnT: 0, defeated: false,
+        charges: {}, chargeP: {}, prayers: 0,
+        prayMul: i === 1 ? d.pray : 1, econ: i === 1 ? d.econ * LAYOUT.ai.econ : 1, kills: 0,
+      };
+      for (const id of SPELL_ORDER) { tr.charges[id] = tr.unlocked.has(id) ? Math.min(SPELLS[id].charges, st.charges[id] ?? 1) : 0; tr.chargeP[id] = 0; }
+      return tr;
+    });
     this.setup();
     this.ai = new AI(this, 1, d);
   }
 
   setup() {
     const R = this.rand;
-    for (const h of LAYOUT.heads) this.heads.push(new StoneHead(this, h.x, h.z, h.spell));
+    for (const h of LAYOUT.heads) this.heads.push(new StoneHead(this, h.x, h.z, h.spell, h.far));
     for (let t = 0; t < 2; t++) {
       const b = LAYOUT.bases[t];
       const s = t === 0 ? 1 : -1;
@@ -43,8 +48,8 @@ export class Game {
       this.placeBuilding('hut', t, b.x + 10 * s, b.z + 3 * s, true);
       this.placeBuilding('hut', t, b.x - 3 * s, b.z - 10 * s, true);
       this.spawnUnit('shaman', t, b.x + 4 * s, b.z + 6 * s);
-      const n = t === 1 ? 7 : 6;
-      for (let i = 0; i < n; i++) this.spawnUnit('brave', t, b.x + (R() - 0.5) * 10 + 5 * s, b.z + (R() - 0.5) * 10 + 5 * s);
+      for (let i = 0; i < LAYOUT.start.braves[t]; i++) this.spawnUnit('brave', t, b.x + (R() - 0.5) * 10 + 5 * s, b.z + (R() - 0.5) * 10 + 5 * s);
+      for (let i = 0; i < LAYOUT.start.warriors[t]; i++) this.spawnUnit('warrior', t, b.x + (R() - 0.5) * 8 - 4 * s, b.z + (R() - 0.5) * 8 + 4 * s);
     }
     // 樹林
     const noiseF = (x, z) => Math.sin(x * 0.07 + this.seed) + Math.sin(z * 0.09 - this.seed * 0.7) + Math.sin((x + z) * 0.05);
@@ -80,8 +85,7 @@ export class Game {
     this.rocks.count = this.rockData.length;
     this.scene.add(this.rocks);
     // 野人
-    const camps = [[-20, 40], [25, -45], [-95, -5], [95, 5], [-10, -60], [10, 60], [0, 10]];
-    for (const [cx, cz] of camps) {
+    for (const [cx, cz] of LAYOUT.camps) {
       const n = 2 + Math.floor(R() * 3);
       for (let i = 0; i < n; i++) {
         let x = cx + (R() - 0.5) * 12, z = cz + (R() - 0.5) * 12;
@@ -94,8 +98,8 @@ export class Game {
 
   setDifficulty(d) {
     this.opts.diff = d;
-    this.ai.diff = d; this.ai.nextAttack = d.firstAttack;
-    this.tribes[1].manaMul = d.mana; this.tribes[1].econ = d.econ;
+    this.ai.diff = d; this.ai.nextAttack = d.firstAttack * LAYOUT.ai.attack;
+    this.tribes[1].prayMul = d.pray; this.tribes[1].econ = d.econ * LAYOUT.ai.econ;
     if (d.name === '困難') { const b = LAYOUT.bases[1]; for (let i = 0; i < 3; i++) this.spawnUnit('warrior', 1, b.x - 6 + i, b.z + 6); }
   }
 
@@ -205,15 +209,36 @@ export class Game {
 
   // ---------- 事件 ----------
   castSpell(caster, id, x, z) { castSpell(this, caster, id, x, z); }
+  // ---------- 法術彈藥 ----------
+  // 祈禱補充某個法術；滿了就不再累積
+  addCharge(t, id, amt, pos) {
+    const tr = this.tribes[t], sp = SPELLS[id];
+    if (!tr.unlocked.has(id) || tr.charges[id] >= sp.charges) { tr.chargeP[id] = 0; return false; }
+    tr.chargeP[id] += amt * tr.prayMul;
+    if (tr.chargeP[id] >= sp.need) {
+      tr.chargeP[id] -= sp.need; tr.charges[id]++;
+      if (tr.charges[id] >= sp.charges) tr.chargeP[id] = 0;
+      if (t === 0) { if (pos) this.floatText(`${sp.icon} ${sp.name} +1`, pos, '#9ef0ff'); if (tr.charges[id] >= sp.charges) this.msg(`${sp.icon} ${sp.name} 彈藥已滿（${sp.charges}/${sp.charges}）`, '#9ef0ff'); }
+    }
+    return true;
+  }
+  // 在圖騰祈禱：平均分給所有未滿的法術
+  prayGeneral(t, amt, pos) {
+    const tr = this.tribes[t];
+    const open = SPELL_ORDER.filter((id) => tr.unlocked.has(id) && tr.charges[id] < SPELLS[id].charges);
+    for (const id of open) this.addCharge(t, id, amt / open.length, pos);
+  }
+  needsCharge(t) { const tr = this.tribes[t]; return SPELL_ORDER.some((id) => tr.unlocked.has(id) && tr.charges[id] < SPELLS[id].charges); }
   unlockSpell(t, spell, head) {
     const tr = this.tribes[t];
     if (tr.unlocked.has(spell)) return;
     tr.unlocked.add(spell);
+    tr.charges[spell] = Math.max(tr.charges[spell], 1); tr.chargeP[spell] = 0;
     const sp = SPELLS[spell];
     this.fx.ringWave(head.pos.x, head.pos.y + 1, head.pos.z, 6, 0xfff0a0, 120);
     this.fx.magic(head.pos.x, head.pos.y + 2, head.pos.z, 0xfff0a0, 60, 2);
     if (t === 0) {
-      this.msg(`${sp.icon} 眾神回應了祈禱！獲得法術「${sp.name}」`, '#ffe28a');
+      this.msg(`${sp.icon} 眾神回應了祈禱！獲得法術「${sp.name}」（繼續在此祈禱可補充次數）`, '#ffe28a');
       this.sfx('unlock');
       this.banner = { text: `獲得法術：${sp.icon} ${sp.name}`, t: 3.5 };
     } else this.msg(`⚠ ${tr.name} 在石像獲得了「${sp.name}」`, '#ff9a8a');
@@ -280,7 +305,6 @@ export class Game {
       const tr = this.tribes[t];
       const f = this.units.reduce((n, u) => n + (u.alive && u.tribe === t && u.isFollower ? 1 : 0), 0);
       tr.followers = f;
-      tr.mana = Math.min(MANA_MAX, tr.mana + dt * (0.25 + f * 0.012) * tr.manaMul);
       if (!tr.shaman && tr.respawnT > 0) {
         tr.respawnT -= dt;
         if (tr.respawnT <= 0 && tr.totem && tr.totem.alive) {

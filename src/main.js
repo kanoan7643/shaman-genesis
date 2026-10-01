@@ -7,7 +7,8 @@ import { OutputPass } from 'three/addons/postprocessing/OutputPass.js';
 import { Game } from './game.js';
 import { Audio } from './fx.js';
 import { makeGhost } from './models.js';
-import { SPELLS, SPELL_ORDER, BUILD, TRAIN_COST, DIFFICULTY, LAYOUT, HALF, WATER, HEAD_NEED, UNIT_STATS, TRIBE_CSS, MANA_MAX } from './config.js';
+import { SPELLS, SPELL_ORDER, BUILD, TRAIN_COST, DIFFICULTY, LAYOUT, HALF, WATER, UNIT_STATS, UNIT_TABS, TRIBE_CSS, PRAY_HEAD, PRAY_TOTEM } from './config.js';
+import { LEVELS, LEVEL_ORDER, applyLevel } from './levels.js';
 
 const $ = (id) => document.getElementById(id);
 const canvas = $('view'), overlay = $('overlay'), octx = overlay.getContext('2d');
@@ -15,9 +16,11 @@ const mini = $('minimap'), mctx = mini.getContext('2d');
 
 // ---------- 設定 ----------
 const params = new URLSearchParams(location.search);
-let settings = { diff: params.get('d') || 'normal', quality: params.get('q') || 'ultra', sound: true, edge: true };
+let settings = { diff: params.get('d') || 'normal', quality: params.get('q') || 'ultra', level: 'twin', sound: true, edge: true };
 try { Object.assign(settings, JSON.parse(localStorage.getItem('shaman-settings') || '{}')); } catch (e) { /* 無痕模式 */ }
 if (params.get('d')) settings.diff = params.get('d');
+if (params.get('level')) settings.level = params.get('level');
+if (!LEVELS[settings.level]) settings.level = 'twin';
 const saveSettings = () => { try { localStorage.setItem('shaman-settings', JSON.stringify(settings)); } catch (e) { /* 忽略 */ } };
 
 // ---------- 渲染器 ----------
@@ -27,19 +30,25 @@ renderer.toneMappingExposure = 1.05;
 renderer.shadowMap.enabled = true;
 renderer.shadowMap.type = THREE.PCFSoftShadowMap;
 
-const scene = new THREE.Scene();
-scene.fog = new THREE.Fog(0xbcd8ea, 240, 680);
+let scene = null;
 const camera = new THREE.PerspectiveCamera(42, 1, 0.5, 2600);
 
 const sunDir = new THREE.Vector3(0.5, 0.75, 0.35).normalize();
 const sun = new THREE.DirectionalLight(0xfff1dc, 3.2);
 sun.castShadow = true;
 sun.shadow.bias = -0.0004; sun.shadow.normalBias = 0.6;
-scene.add(sun, sun.target);
-scene.add(new THREE.HemisphereLight(0xcfe6ff, 0x6a5534, 1.25));
-scene.add(new THREE.AmbientLight(0xffffff, 0.15));
+const lights = [sun, sun.target, new THREE.HemisphereLight(0xcfe6ff, 0x6a5534, 1.25), new THREE.AmbientLight(0xffffff, 0.15)];
+function buildScene() {
+  if (scene) scene.traverse((o) => {
+    if (o.geometry) o.geometry.dispose();
+    if (o.material) for (const m of [].concat(o.material)) m.dispose();
+  });
+  scene = new THREE.Scene();
+  scene.fog = new THREE.Fog(0xbcd8ea, 240, 680);
+  scene.add(...lights);
+}
 
-let composer = null, bloom = null;
+let composer = null, bloom = null, renderPass = null;
 function applyQuality() {
   const q = settings.quality, dpr = window.devicePixelRatio || 1;
   const pr = q === 'ultra' ? Math.min(dpr * 1.25, 2.5) : q === 'high' ? Math.min(dpr, 1.5) : 1;
@@ -49,7 +58,8 @@ function applyQuality() {
   if (q !== 'perf') {
     const rt = new THREE.WebGLRenderTarget(1, 1, { type: THREE.HalfFloatType, samples: q === 'ultra' ? 4 : 2 });
     composer = new EffectComposer(renderer, rt);
-    composer.addPass(new RenderPass(scene, camera));
+    renderPass = new RenderPass(scene, camera);
+    composer.addPass(renderPass);
     bloom = new UnrealBloomPass(new THREE.Vector2(256, 256), 0.55, 0.45, 0.92);
     composer.addPass(bloom);
     composer.addPass(new OutputPass());
@@ -71,13 +81,24 @@ window.addEventListener('resize', resize);
 // ---------- 遊戲 ----------
 const audio = new Audio();
 let game = null, started = false, paused = false;
+let miniImg = null, miniT = 0;
 const seed = Math.floor(Math.random() * 1e6);
-game = new Game(scene, audio, { seed, diff: DIFFICULTY[settings.diff] || DIFFICULTY.normal });
+const cam = { x: 0, z: 0, y: 3, yaw: 0.6, tYaw: 0.6, dist: 150, tDist: 150 };
+const base = () => LAYOUT.bases[0];
+// 建立（或切換關卡時重建）整個世界
+function newWorld(levelId) {
+  applyLevel(levelId);
+  buildScene();
+  game = new Game(scene, audio, { seed, diff: DIFFICULTY[settings.diff] || DIFFICULTY.normal });
+  if (renderPass) renderPass.scene = scene;
+  miniImg = null;
+  cam.x = base().x + 8; cam.z = base().z - 6;
+  window.__game = game;
+  resize();
+}
+newWorld(settings.level);
 applyQuality();
 $('loading').classList.add('hidden');
-
-const base = LAYOUT.bases[0];
-const cam = { x: base.x + 8, z: base.z - 6, y: 3, yaw: 0.6, tYaw: 0.6, dist: 150, tDist: 150 };
 
 // ---------- 選取與模式 ----------
 let selection = [];       // 我方單位
@@ -195,7 +216,10 @@ function command(sx, sy) {
     const sh = mine.find((u) => u.type === 'shaman');
     if (sh) sh.setOrder({ type: 'move', x: h.obj.pos.x + 6, z: h.obj.pos.z + 6 }, true);
     ping(h.obj.pos.x, h.obj.pos.z, '#ffe28a'); audio.play('order');
-    if (h.kind === 'head' && game.tribes[0].unlocked.has(h.obj.spell)) game.msg('此石像法術已解鎖，繼續祈禱可獲得法力');
+    if (h.kind === 'head' && game.tribes[0].unlocked.has(h.obj.spell)) {
+      const sp = SPELLS[h.obj.spell], c = game.tribes[0].charges[h.obj.spell];
+      game.msg(c >= sp.charges ? `${sp.icon} ${sp.name} 次數已滿（${c}/${sp.charges}）` : `在石像祈禱，補充 ${sp.icon} ${sp.name} 的次數`);
+    }
     return;
   }
   if (h.kind === 'building' && h.obj.tribe === 0 && !h.obj.complete && braves.length) {
@@ -223,6 +247,7 @@ function enterCast(id) {
   const tr = game.tribes[0];
   if (!tr.unlocked.has(id)) { game.msg(`「${SPELLS[id].name}」尚未解鎖——讓子民到石像祈禱`); audio.play('error'); return; }
   if (!playerShaman()) { game.msg('薩滿不在，無法施法'); audio.play('error'); return; }
+  if (tr.charges[id] < 1) { game.msg(`${SPELLS[id].icon} ${SPELLS[id].name} 沒有次數了——讓子民到石像或圖騰祈禱補充`); audio.play('error'); return; }
   cancelMode();
   mode = { kind: 'cast', spell: id };
 }
@@ -241,7 +266,7 @@ function doCast(gp) {
   const s = playerShaman();
   if (!s || !gp) return;
   const sp = SPELLS[mode.spell];
-  if (game.tribes[0].mana < sp.cost) { game.msg('法力不足！派子民到靈魂圖騰祈禱以累積法力'); audio.play('error'); return; }
+  if (game.tribes[0].charges[mode.spell] < 1) { game.msg(`${sp.icon} ${sp.name} 沒有次數了`); audio.play('error'); cancelMode(); return; }
   s.setOrder({ type: 'cast', spell: mode.spell, x: gp.x, z: gp.z }, true);
   ping(gp.x, gp.z, '#9ef0ff'); audio.play('order');
   if (!keys.has('shift')) cancelMode();
@@ -288,12 +313,28 @@ function autoWork() {
 function stopSel() { for (const u of selection) if (u.alive) u.setOrder({ type: 'idle' }, true); }
 function selectShaman() {
   const s = playerShaman();
-  if (!s) { game.msg(`薩滿將於 ${Math.ceil(game.tribes[0].respawnT)} 秒後重生`); return; }
+  if (!s) { game.msg(game.tribes[0].respawnT > 0 ? `薩滿將於 ${Math.ceil(game.tribes[0].respawnT)} 秒後重生` : '薩滿已無法重生'); audio.play('error'); return; }
   setSel([s]);
   if (Math.hypot(cam.x - s.pos.x, cam.z - s.pos.z) < 3) return;
   cam.x = s.pos.x; cam.z = s.pos.z;
 }
-function selectType(type) { setSel(game.units.filter((u) => u.alive && u.tribe === 0 && u.type === type)); }
+// 單位分頁：選取某兵種的所有單位；短時間內再按一次則鏡頭移到該部隊
+let lastTab = { type: null, t: 0 };
+function selectTab(type, add) {
+  if (type === 'shaman' && !add) { selectShaman(); return; }
+  const list = game.units.filter((u) => u.alive && u.tribe === 0 && u.type === type);
+  if (!list.length) { game.msg(`目前沒有${UNIT_STATS[type].name}`); audio.play('error'); return; }
+  const now = performance.now(), again = lastTab.type === type && now - lastTab.t < 450;
+  lastTab = { type, t: now };
+  setSel(list, add);
+  if (again) {
+    // 鏡頭移到離目前畫面最近的一群
+    let best = list[0], bd = 1e9;
+    for (const u of list) { const d = Math.hypot(u.pos.x - cam.x, u.pos.z - cam.z); if (d < bd) { bd = d; best = u; } }
+    const near = list.filter((u) => Math.hypot(u.pos.x - best.pos.x, u.pos.z - best.pos.z) < 25);
+    cam.x = near.reduce((a, u) => a + u.pos.x, 0) / near.length; cam.z = near.reduce((a, u) => a + u.pos.z, 0) / near.length;
+  }
+}
 
 // ---------- 輸入 ----------
 canvas.addEventListener('contextmenu', (e) => e.preventDefault());
@@ -362,15 +403,16 @@ window.addEventListener('keydown', (e) => {
   if (paused) return;
   const sp = SPELL_ORDER.find((id) => SPELLS[id].key === k);
   if (sp) { enterCast(sp); return; }
+  const tab = !e.ctrlKey && UNIT_TABS.find((t) => UNIT_STATS[t].tab.key === k);
+  if (tab) { selectTab(tab, e.shiftKey); return; }
   if (k === ' ') { e.preventDefault(); selectShaman(); }
   else if (k === 'b') enterBuild('hut');
   else if (k === 'v') enterBuild('warriorhut');
   else if (k === 'g') autoWork();
   else if (k === 't') prayAtTotem();
-  else if (k === 'x') stopSel();
+  else if (k === 'h') stopSel();
   else if (k === 'r') trainWarrior();
-  else if (k === 'f') selectType('warrior');
-  else if (k === 'h') { const t = game.tribes[0].totem; if (t) { cam.x = t.pos.x; cam.z = t.pos.z; } }
+  else if (k === 'home') { const t = game.tribes[0].totem; if (t) { cam.x = t.pos.x; cam.z = t.pos.z; } }
   else if (k === 'a' && e.ctrlKey) { e.preventDefault(); setSel(game.units.filter((u) => u.alive && u.tribe === 0 && u.type !== 'brave')); }
 });
 window.addEventListener('keyup', (e) => {
@@ -407,17 +449,34 @@ for (const id of SPELL_ORDER) {
   const s = SPELLS[id];
   const b = document.createElement('button');
   b.className = 'spell';
-  b.innerHTML = `<span class="hk">${s.key}</span><span class="ic">${s.icon}</span><span class="nm">${s.name}</span><span class="ct">🔮${s.cost}</span><div class="cd"></div>`;
+  b.innerHTML = `<div class="cd"></div><span class="hk">${s.key}</span><span class="ic">${s.icon}</span><span class="nm">${s.name}</span><span class="ct"></span>`;
   b.onclick = () => { audio.init(); enterCast(id); };
   b.onmouseenter = () => showTip(b, () => {
-    const lock = !game.tribes[0].unlocked.has(id);
-    const h = game.heads.find((h) => h.spell === id && Math.hypot(h.pos.x - base.x, h.pos.z - base.z) < 120);
-    return `<b>${s.icon} ${s.name}</b>（${s.key}）<br>${s.desc}<br>法力 ${s.cost} · 射程 ${s.range}` +
-      (lock ? `<br><span style="color:#ffb27a">🔒 讓子民在${h && LAYOUT.islands.some((i) => Math.hypot(i.x - h.pos.x, i.z - h.pos.z) < 5) ? '孤島上的' : ''}石像祈禱以解鎖</span>` : '');
+    const tr = game.tribes[0], lock = !tr.unlocked.has(id);
+    const heads = game.heads.filter((h) => h.spell === id);
+    const where = !heads.length ? '<br><span style="color:#ff8a7a">此地圖沒有這座石像</span>'
+      : heads.every((h) => h.far) ? '（石像位於孤島，需要陸橋）' : '';
+    return `<b>${s.icon} ${s.name}</b>（${s.key}）<br>${s.desc}<br>射程 ${s.range} · 最多 ${s.charges} 次` +
+      (lock ? `<br><span style="color:#ffb27a">🔒 讓子民在「${s.name}」石像祈禱以解鎖（需 ${s.unlock} 祈禱量）${where}</span>`
+        : `<br>剩餘 <b>${tr.charges[id]}/${s.charges}</b> 次 · 補充一次需 ${s.need} 祈禱量` +
+          `<br><small>在${s.name}石像祈禱：每人每秒 ${PRAY_HEAD}；在圖騰祈禱：每人每秒 ${PRAY_TOTEM}，平分給所有未滿的法術。人越多越快。</small>${where}`);
   });
   b.onmouseleave = hideTip;
   spellBox.appendChild(b);
   spellBtns[id] = b;
+}
+const tabBox = $('unitTabs');
+const tabBtns = {};
+for (const type of UNIT_TABS) {
+  const st = UNIT_STATS[type];
+  const b = document.createElement('button');
+  b.className = 'utab';
+  b.innerHTML = `<span class="hk">${st.tab.label}</span><span class="ic">${st.tab.icon}</span><span class="nm">${st.name}</span><b class="n">0</b>`;
+  b.onclick = (e) => { audio.init(); selectTab(type, e.shiftKey); };
+  b.onmouseenter = () => showTip(b, () => `<b>${st.tab.icon} ${st.name}</b>（${st.tab.label}${type === 'shaman' ? ' / 空白鍵' : ''}）<br>選取所有${st.name} · Shift 加選 · 連按兩下移動鏡頭`);
+  b.onmouseleave = hideTip;
+  tabBox.appendChild(b);
+  tabBtns[type] = b;
 }
 const tip = $('tooltip');
 let tipFn = null, tipEl = null;
@@ -451,26 +510,30 @@ function buildPanel() {
     const o = selObj;
     if (o.kind === 'head') {
       const s = SPELLS[o.spell], own = tr.unlocked.has(o.spell);
-      info = `<h3>🗿 神秘石像 · ${s.icon}${s.name}</h3>${own ? '<span style="color:#bfe8a8">✔ 已解鎖，祈禱可獲得法力</span>' : `我方祈禱 ${Math.floor(o.progress[0] / HEAD_NEED * 100)}%`} · 敵方 ${Math.floor(o.progress[1] / HEAD_NEED * 100)}%<br><small>選取子民後右鍵石像進行祈禱</small>`;
+      const c = tr.charges[o.spell], full = c >= s.charges;
+      info = `<h3>🗿 ${s.name}石像 · ${s.icon}</h3>` + (own
+        ? `<span style="color:#bfe8a8">✔ 已解鎖</span> · 次數 <b>${c}/${s.charges}</b> · ${full ? '已滿' : `補充 ${Math.floor(tr.chargeP[o.spell] / s.need * 100)}%`}`
+        : `解鎖進度 我方 ${Math.floor(o.progress[0] / o.need * 100)}% · 敵方 ${Math.floor(o.progress[1] / o.need * 100)}%`) +
+        `<br><small>${o.prayers[0] ? `🙏 ${o.prayers[0]} 人祈禱中 · ` : ''}選取子民後右鍵石像祈禱${own ? '補充次數' : '解鎖'}，人越多越快</small>`;
     } else if (o.kind === 'building') {
       const st = BUILD[o.type];
       info = `<h3>${o.tribe === 1 ? '敵方 ' : ''}${st.name}</h3>${hpBar(o)}`;
       if (!o.complete) info += `建造中 ${Math.floor(o.progress * 100)}%`;
       else if (o.type === 'hut') info += `每 26 秒產生一名勇者 · 人口 ${game.popOf(o.tribe)}/${game.capOf(o.tribe)}`;
       else if (o.type === 'warriorhut') info += `訓練佇列：${o.trainQ}${o.trainQ ? `（${Math.floor(o.trainT / 5 * 100)}%）` : ''}`;
-      else if (o.type === 'totem') info += `祈禱者 ${o.prayers} 名 · 薩滿重生點<br><small>選取子民右鍵圖騰以祈禱累積法力</small>`;
+      else if (o.type === 'totem') info += `祈禱者 ${o.prayers} 名 · 薩滿重生點<br><small>在圖騰祈禱會平均補充所有未滿的法術</small>`;
       if (o.type === 'warriorhut' && o.tribe === 0 && o.complete) acts.push(act('🗡 訓練戰士', `${TRAIN_COST} 木 (R)`, trainWarrior, tr.wood < TRAIN_COST));
     } else if (o.kind === 'unit') {
       info = `<h3>${o.tribe === 2 ? '野人' : '敵方 ' + UNIT_STATS[o.type].name}</h3>${hpBar(o)}${o.tribe === 2 ? '使用「感化」將他們轉化為子民' : ''}`;
     }
   } else {
-    info = `<h3>${tr.name}</h3><small>拖曳框選子民 · 空白鍵選取薩滿<br>子民在圖騰祈禱 → 法力；在石像祈禱 → 新法術</small>`;
+    info = `<h3>${LAYOUT.icon} ${LAYOUT.name}</h3><small>拖曳框選子民 · Z/X/C 分頁選取兵種<br>在石像祈禱 → 解鎖法術、補充次數；在圖騰祈禱 → 補充全部</small>`;
   }
   if (sel.length) {
     const hasF = sel.some((u) => u.isFollower), hasB = sel.some((u) => u.type === 'brave');
     acts.push(act('🙏 圖騰祈禱', '(T)', prayAtTotem, !hasF || !tr.totem));
     acts.push(act('🪓 自動工作', '(G)', autoWork, !hasB));
-    acts.push(act('✋ 停止', '(X)', stopSel, false));
+    acts.push(act('✋ 停止', '(H)', stopSel, false));
   }
   acts.push(act('🛖 小屋', `${BUILD.hut.wood} 木 (B)`, () => enterBuild('hut'), tr.wood < BUILD.hut.wood, '增加人口上限 6，並定期產生勇者'));
   acts.push(act('⚔ 訓練所', `${BUILD.warriorhut.wood} 木 (V)`, () => enterBuild('warriorhut'), tr.wood < BUILD.warriorhut.wood, '把勇者訓練成強壯的戰士'));
@@ -497,22 +560,32 @@ let uiT = 0, logSig = '';
 function updateUI(dt) {
   uiT -= dt;
   const tr = game.tribes[0];
-  $('manaFill').style.width = (tr.mana / MANA_MAX * 100) + '%';
-  $('manaText').textContent = `法力 ${Math.floor(tr.mana)} / ${MANA_MAX}`;
   if (uiT > 0) return;
   uiT = 0.15;
   $('wood').textContent = Math.floor(tr.wood);
   $('pop').textContent = `${game.popOf(0)}/${game.capOf(0)}`;
   $('enemyPop').textContent = game.tribes[1].followers ?? 0;
+  $('prayers').textContent = game.units.reduce((n, u) => n + (u.alive && u.tribe === 0 && u.working === 'pray' ? 1 : 0), 0);
+  const selTypes = new Set(selection.filter((u) => u.alive).map((u) => u.type));
+  for (const type of UNIT_TABS) {
+    const n = game.units.reduce((a, u) => a + (u.alive && u.tribe === 0 && u.type === type ? 1 : 0), 0);
+    const b = tabBtns[type];
+    b.querySelector('.n').textContent = type === 'shaman' && !n && game.tribes[0].respawnT > 0 ? `${Math.ceil(game.tribes[0].respawnT)}s` : n;
+    b.classList.toggle('empty', !n);
+    b.classList.toggle('on', selTypes.has(type));
+  }
   const t = Math.floor(game.time);
   $('clock').textContent = `${Math.floor(t / 60)}:${String(t % 60).padStart(2, '0')}`;
   for (const id of SPELL_ORDER) {
     const b = spellBtns[id], s = SPELLS[id], lock = !tr.unlocked.has(id);
+    const c = tr.charges[id], full = c >= s.charges;
     b.classList.toggle('locked', lock);
-    b.classList.toggle('poor', !lock && tr.mana < s.cost);
-    b.classList.toggle('ready', !lock && tr.mana >= s.cost);
+    b.classList.toggle('poor', !lock && c < 1);
+    b.classList.toggle('ready', !lock && c >= 1);
     b.classList.toggle('active', !!(mode && mode.spell === id));
-    b.querySelector('.cd').style.height = lock ? '0' : Math.min(100, tr.mana / s.cost * 100) + '%';
+    b.classList.toggle('hidden', lock && !game.heads.some((h) => h.spell === id));
+    b.querySelector('.cd').style.height = lock || full ? '0' : Math.min(100, tr.chargeP[id] / s.need * 100) + '%';
+    b.querySelector('.ct').innerHTML = lock ? '' : '<i class="on"></i>'.repeat(c) + '<i></i>'.repeat(s.charges - c);
   }
   buildPanel();
   const sig = game.messages.map((m) => m.text).join('|');
@@ -529,8 +602,11 @@ function updateUI(dt) {
     $('end').classList.remove('hidden');
     $('endTitle').textContent = game.over === 'win' ? '🏆 勝利！' : '💀 部族覆滅';
     $('endText').textContent = game.over === 'win'
-      ? `你在 ${$('clock').textContent} 內擊潰了赤焰部族，眾神為你歡呼！`
+      ? `你在 ${$('clock').textContent} 內於「${LAYOUT.name}」擊潰了赤焰部族，眾神為你歡呼！`
       : `赤焰部族消滅了你的子民……但信仰永不熄滅。`;
+    const next = LEVEL_ORDER[LEVEL_ORDER.indexOf(LAYOUT.id) + 1];
+    $('btnNext').classList.toggle('hidden', !(game.over === 'win' && next));
+    if (next) $('btnNext').textContent = `下一關：${LEVELS[next].name}`;
   }
 }
 
@@ -591,19 +667,21 @@ function drawOverlay() {
   for (const h of game.heads) {
     const s = toScreen(h.pos.x, h.pos.y + 6.5, h.pos.z);
     if (!s.ok || s.x < -40 || s.x > W + 40 || s.y < -40 || s.y > H + 40) continue;
-    const sp = SPELLS[h.spell], own = game.tribes[0].unlocked.has(h.spell);
+    const tr0 = game.tribes[0], sp = SPELLS[h.spell], own = tr0.unlocked.has(h.spell);
     octx.fillStyle = 'rgba(20,14,6,.78)';
     octx.beginPath(); octx.arc(s.x, s.y, 17, 0, Math.PI * 2); octx.fill();
     octx.strokeStyle = own ? '#9ef0ff' : '#f1c86a'; octx.lineWidth = 2; octx.stroke();
     octx.font = '18px "Segoe UI Emoji", sans-serif'; octx.fillText(sp.icon, s.x, s.y + 6);
     octx.font = '600 13px "Noto Sans TC", sans-serif';
     for (let t = 0; t < 2; t++) {
-      const f = h.progress[t] / HEAD_NEED;
-      octx.strokeStyle = t === 0 ? '#3d8dff' : '#ff4a3a'; octx.lineWidth = 3.5;
+      // 已解鎖的一方不再顯示解鎖進度；我方改顯示補充進度
+      if (game.tribes[t].unlocked.has(h.spell) && t === 1) continue;
+      const f = t === 0 && own ? tr0.chargeP[h.spell] / sp.need : h.progress[t] / h.need;
+      octx.strokeStyle = t === 0 ? (own ? '#9ef0ff' : '#3d8dff') : '#ff4a3a'; octx.lineWidth = 3.5;
       if (f > 0) { octx.beginPath(); octx.arc(s.x, s.y, 21 + t * 5, -Math.PI / 2, -Math.PI / 2 + f * Math.PI * 2); octx.stroke(); }
     }
     octx.fillStyle = own ? '#9ef0ff' : '#ffe9a8';
-    octx.fillText(own ? `${sp.name} ✔` : sp.name, s.x, s.y + 42);
+    octx.fillText(own ? `${sp.name} ${tr0.charges[h.spell]}/${sp.charges}` : sp.name, s.x, s.y + 42);
     if (h.prayers[0]) { octx.fillStyle = '#bfe0ff'; octx.fillText(`🙏×${h.prayers[0]}`, s.x, s.y - 30); }
   }
   // 漂浮文字
@@ -654,7 +732,6 @@ function drawOverlay() {
 }
 
 // ---------- 小地圖 ----------
-let miniImg = null, miniT = 0;
 function drawMinimap(dt) {
   const S = mini.width;
   miniT -= dt;
@@ -803,10 +880,10 @@ function startGame() {
   game.setDifficulty(DIFFICULTY[settings.diff] || DIFFICULTY.normal);
   $('start').classList.add('hidden'); $('hud').classList.remove('hidden');
   started = true;
-  cam.x = base.x + 6; cam.z = base.z + 4; cam.tDist = 70; cam.tYaw = Math.round(cam.yaw / (Math.PI * 2)) * Math.PI * 2 + 0.5;
-  game.msg(`歡迎，${game.tribes[0].name} 的薩滿！`, '#ffe28a');
-  game.msg('選取子民右鍵「靈魂圖騰」祈禱以累積法力', '#bfe0ff');
-  game.msg('右鍵附近的「石像」祈禱可解鎖新法術', '#bfe0ff');
+  cam.x = base().x + 6; cam.z = base().z + 4; cam.tDist = 70; cam.tYaw = Math.round(cam.yaw / (Math.PI * 2)) * Math.PI * 2 + 0.5;
+  game.msg(`${LAYOUT.icon} ${LAYOUT.name}——歡迎，${game.tribes[0].name} 的薩滿！`, '#ffe28a');
+  game.msg('法術有使用次數：選取子民右鍵該法術的「石像」祈禱來補充', '#bfe0ff');
+  game.msg('右鍵尚未解鎖的石像祈禱可獲得新法術 · Z/X/C 快速選取兵種', '#bfe0ff');
   selectShaman();
   last = performance.now();
 }
@@ -820,8 +897,27 @@ $('btnMenu').onclick = togglePause;
 const restart = () => { saveSettings(); location.reload(); };
 $('btnRestart').onclick = restart;
 $('btnAgain').onclick = restart;
+$('btnNext').onclick = () => { const next = LEVEL_ORDER[LEVEL_ORDER.indexOf(LAYOUT.id) + 1]; if (next) settings.level = next; restart(); };
+
+// 關卡選擇
+const levelBox = $('levels');
+function renderLevels() {
+  levelBox.innerHTML = '';
+  for (const id of LEVEL_ORDER) {
+    const lv = LEVELS[id], b = document.createElement('button');
+    b.className = 'lvl' + (id === settings.level ? ' on' : '');
+    b.innerHTML = `<span class="ic">${lv.icon}</span><b>${lv.name}</b><small>${lv.sub}</small>`;
+    b.onclick = () => {
+      if (settings.level === id) return;
+      settings.level = id; saveSettings();
+      newWorld(id); renderLevels();
+    };
+    levelBox.appendChild(b);
+  }
+  $('levelDesc').textContent = LEVELS[settings.level].desc;
+}
+renderLevels();
 
 // 開發者除錯用
-window.__game = game;
 window.__cam = cam;
 window.__dbg = { toScreen, hoverAt, pickGround };

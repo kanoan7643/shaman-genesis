@@ -8,7 +8,8 @@ export class AI {
     const base = LAYOUT.bases[tribe];
     this.base = base;
     // 敵方可觸及的石像（不含孤島）
-    this.heads = g.heads.filter((h) => Math.hypot(h.pos.x - base.x, h.pos.z - base.z) < 110 && !LAYOUT.islands.some((i) => Math.hypot(i.x - h.pos.x, i.z - h.pos.z) < 5));
+    this.heads = g.heads.filter((h) => Math.hypot(h.pos.x - base.x, h.pos.z - base.z) < 120 && !h.far)
+      .sort((a, b) => Math.hypot(a.pos.x - base.x, a.pos.z - base.z) - Math.hypot(b.pos.x - base.x, b.pos.z - base.z));
   }
   update(dt) {
     this.t -= dt; this.castT -= dt;
@@ -54,14 +55,25 @@ export class AI {
       }
       break; // 一次專注一座石像
     }
-    // 祈禱：圖騰法力
-    if (totem) {
+    // 祈禱：補充法術次數（圖騰平均補充；火球另派人到最近的火球石像）
+    const needCharge = g.needsCharge(T);
+    if (totem && needCharge) {
       const atTotem = braves.filter((u) => u.ord.type === 'pray' && u.ord.site === totem).length;
       const want = Math.min(6, Math.floor(braves.length / 4));
-      if (atTotem < want && tr.mana < 280) { const b = idleBraves()[0]; if (b) b.setOrder({ type: 'pray', site: totem }, true); }
+      if (atTotem < want) { const b = idleBraves()[0]; if (b) b.setOrder({ type: 'pray', site: totem }, true); }
     }
-    // 石像解鎖後釋放祈禱者
-    for (const b of braves) if (b.ord.type === 'pray' && b.ord.site.kind === 'head' && tr.unlocked.has(b.ord.site.spell)) b.setOrder({ type: 'idle' }, false);
+    const blastHead = this.heads.find((h) => h.spell === 'blast');
+    if (blastHead && tr.unlocked.has('blast') && tr.charges.blast < SPELLS.blast.charges && braves.length > 8) {
+      const at = braves.filter((u) => u.ord.type === 'pray' && u.ord.site === blastHead).length;
+      if (at < 2) { const b = idleBraves()[0]; if (b) b.setOrder({ type: 'pray', site: blastHead }, true); }
+    }
+    // 解鎖完成或彈藥已滿時釋放祈禱者
+    for (const b of braves) {
+      if (b.ord.type !== 'pray') continue;
+      const site = b.ord.site;
+      if (site.kind === 'head' && tr.unlocked.has(site.spell) && tr.charges[site.spell] >= SPELLS[site.spell].charges) b.setOrder({ type: 'idle' }, false);
+      else if (site.kind === 'building' && !needCharge) b.setOrder({ type: 'idle' }, false);
+    }
 
     // 防守
     const intruders = g.units.filter((u) => u.alive && u.tribe === 0 && Math.hypot(u.pos.x - center.x, u.pos.z - center.z) < 38);
@@ -124,7 +136,8 @@ export class AI {
     const g = this.g, tr = g.tribes[this.tribe], s = tr.shaman;
     if (!s || !s.alive || s.flung || this.castT > 0 || s.ord.type === 'cast') return;
     this.castT = 1.5;
-    const has = (sp) => tr.unlocked.has(sp) && tr.mana >= SPELLS[sp].cost * (this.diff.name === '簡單' ? 1.3 : 1);
+    // 簡單難度會保留最後一發，不會把法術用光
+    const has = (sp) => tr.unlocked.has(sp) && tr.charges[sp] >= (this.diff.name === '簡單' ? 2 : 1);
     const foes = g.units.filter((u) => u.alive && u.tribe === 0 && Math.hypot(u.pos.x - s.pos.x, u.pos.z - s.pos.z) < 44);
     if (foes.length) {
       // 找最密集的敵人
@@ -146,7 +159,7 @@ export class AI {
       }
     }
     // 攻城：對玩家建築丟雷擊
-    if (this.attacking && has('lightning') && tr.mana > 120) {
+    if (this.attacking && has('lightning') && tr.charges.lightning >= 2) {
       const b = g.buildings.find((b) => b.alive && b.tribe === 0 && Math.hypot(b.pos.x - s.pos.x, b.pos.z - s.pos.z) < SPELLS.lightning.range);
       if (b) { s.setOrder({ type: 'cast', spell: 'lightning', x: b.pos.x, z: b.pos.z }, true); return; }
     }

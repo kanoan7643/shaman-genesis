@@ -33,38 +33,31 @@ export class Terrain {
   generate(seed) {
     const rand = mulberry32(seed);
     const n1 = new Noise2D(rand), n2 = new Noise2D(rand), n3 = new Noise2D(rand);
-    const [P, E] = LAYOUT.bases;
+    const L = LAYOUT, mtMul = L.mountain ?? 1;
+    const shapeDist = (s, x, z) => s.t === 'path' ? distToSeg(x, z, s.x0, s.z0, s.x1, s.z1)
+      : s.t === 'ring' ? Math.abs(Math.hypot(x - s.x, z - s.z) - s.r) : Math.hypot(x - s.x, z - s.z);
+    const roads = L.land.filter((s) => s.t !== 'blob');
     for (let j = 0; j < V; j++) for (let i = 0; i < V; i++) {
       const x = i * CELL - HALF, z = j * CELL - HALF;
       const warp = n1.fbm(x * 0.02, z * 0.02, 3) * 16;
       let m = 0;
-      for (const b of LAYOUT.bases) {
-        const d = Math.hypot(x - b.x, z - b.z) + warp;
-        m = Math.max(m, 1 - smoothstep(40, 64, d));
-      }
-      const dIs = distToSeg(x, z, P.x, P.z, E.x, E.z);
-      m = Math.max(m, 1 - smoothstep(5, 11, dIs + warp * 0.35));
-      m = Math.max(m, 1 - smoothstep(9, 17, Math.hypot(x, z) + warp * 0.4));
-      for (const is of LAYOUT.islands) {
-        const d = Math.hypot(x - is.x, z - is.z) + warp * 0.6;
-        m = Math.max(m, 1 - smoothstep(is.r * 0.5, is.r, d));
-      }
+      for (const s of L.land) m = Math.max(m, 1 - smoothstep(s.a, s.b, shapeDist(s, x, z) + warp * s.w));
       let h = -7.5 + m * 10.5;
       const hills = n2.fbm(x * 0.025 + 5, z * 0.025 - 3, 5);
       h += hills * 5 * m;
-      const mt = Math.max(0, n3.fbm(x * 0.013 + 30, z * 0.013 + 11, 4) - 0.08);
-      let mountain = mt * mt * 95 * m;
-      // 主要通道與石像周圍不長山
-      mountain *= smoothstep(6, 16, dIs);
-      for (const hd of LAYOUT.heads) mountain *= smoothstep(6, 14, Math.hypot(x - hd.x, z - hd.z));
+      const mt = Math.max(0, n3.fbm(x * 0.013 + 30, z * 0.013 + 11, 4) - 0.08 + (L.peaks || 0));
+      let mountain = mt * mt * 95 * m * mtMul;
+      // 通道與石像周圍不長山
+      for (const s of roads) mountain *= smoothstep(6, 16, shapeDist(s, x, z));
+      for (const hd of L.heads) mountain *= smoothstep(6, 14, Math.hypot(x - hd.x, z - hd.z));
       h += mountain;
       const e = Math.max(Math.abs(x), Math.abs(z));
       h = lerp(h, -9, smoothstep(104, 126, e));
-      for (const b of LAYOUT.bases) {
+      for (const b of L.bases) {
         const w = 1 - smoothstep(15, 26, Math.hypot(x - b.x, z - b.z));
         h = lerp(h, 3 + hills * 0.8, w);
       }
-      for (const hd of LAYOUT.heads) {
+      for (const hd of L.heads) {
         const w = 1 - smoothstep(3.5, 8, Math.hypot(x - hd.x, z - hd.z));
         h = lerp(h, Math.max(2.4, Math.min(h, 6)), w);
       }

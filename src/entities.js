@@ -1,6 +1,6 @@
 // 單位、建築、石像
 import * as THREE from 'three';
-import { UNIT_STATS, BUILD, WATER, SPELLS, HEAD_NEED, HALF, TRIBE_COLORS, MANA_MAX } from './config.js';
+import { UNIT_STATS, BUILD, WATER, SPELLS, HALF, TRIBE_COLORS, PRAY_HEAD, PRAY_TOTEM } from './config.js';
 import { makeUnitModel, makeBuildingModel, makeStoneHead } from './models.js';
 import { lineClear } from './path.js';
 import { clamp } from './noise.js';
@@ -268,8 +268,8 @@ export class Unit {
     this.face(o.x - this.pos.x, o.z - this.pos.z, dt);
     if (this.castT <= 0) {
       const tr = g.tribes[this.tribe];
-      if (tr.mana < sp.cost) { if (this.tribe === 0) { g.msg('法力不足！派子民到圖騰祈禱吧'); g.sfx('error'); } this.setOrder({ type: 'idle' }); return; }
-      tr.mana -= sp.cost;
+      if (tr.charges[o.spell] < 1) { if (this.tribe === 0) { g.msg(`${sp.icon} ${sp.name} 沒有次數了！讓子民在石像或圖騰祈禱以補充`); g.sfx('error'); } this.setOrder({ type: 'idle' }); return; }
+      tr.charges[o.spell]--;
       this.castT = 0.75;
       g.sfx('cast', this.pos);
       g.fx.magic(this.pos.x, this.pos.y + 2, this.pos.z, TRIBE_COLORS[this.tribe], 25, 0.8);
@@ -411,8 +411,7 @@ export class Building {
     }
   }
   pray(u, dt) {
-    const tr = this.game.tribes[this.tribe];
-    tr.mana = Math.min(MANA_MAX, tr.mana + dt * 1.25 * (tr.manaMul || 1));
+    this.game.prayGeneral(this.tribe, dt * PRAY_TOTEM, this.pos);
     this.prayCount++;
   }
   update(dt) {
@@ -485,12 +484,13 @@ export class Building {
 
 // ---------- 石像 ----------
 export class StoneHead {
-  constructor(game, x, z, spell) {
+  constructor(game, x, z, spell, far = false) {
     this.id = NEXT_ID++;
-    this.kind = 'head'; this.type = 'head';
+    this.kind = 'head'; this.far = far; this.type = 'head';
     this.game = game; this.spell = spell; this.tribe = -1;
     this.pos = new THREE.Vector3(x, game.terrain.heightAt(x, z), z);
     this.radius = 2.6; this.prayR = 4.6; this.alive = true;
+    this.need = SPELLS[spell].unlock;
     this.progress = [0, 0]; this.prayCount = [0, 0]; this.prayers = [0, 0]; this.slot = 0;
     const m = makeStoneHead();
     this.model = m;
@@ -504,9 +504,9 @@ export class StoneHead {
     const g = this.game, tr = g.tribes[t];
     this.prayCount[t]++;
     if (!tr.unlocked.has(this.spell)) {
-      this.progress[t] += dt;
-      if (this.progress[t] >= HEAD_NEED) { this.progress[t] = HEAD_NEED; g.unlockSpell(t, this.spell, this); }
-    } else tr.mana = Math.min(MANA_MAX, tr.mana + dt * 0.8 * (tr.manaMul || 1));
+      this.progress[t] += dt * tr.prayMul;
+      if (this.progress[t] >= this.need) { this.progress[t] = this.need; g.unlockSpell(t, this.spell, this); }
+    } else g.addCharge(t, this.spell, dt * PRAY_HEAD, this.pos);
   }
   update(dt) {
     const g = this.game;
