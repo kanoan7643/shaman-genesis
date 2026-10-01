@@ -224,6 +224,7 @@ export class Terrain {
       uTime: { value: 0 }, uHeight: { value: this.heightTex },
       uSun: { value: new THREE.Vector3(0.5, 0.75, 0.35).normalize() },
       uFog: { value: new THREE.Color(0xbcd8ea) }, uFogNear: { value: 220 }, uFogFar: { value: 640 },
+      uWar: { value: null }, uWarMix: { value: 0 },
     };
     const mat = new THREE.ShaderMaterial({
       uniforms: this.waterUniforms, transparent: true, depthWrite: false,
@@ -232,6 +233,7 @@ export class Terrain {
         void main(){ vec4 w = modelMatrix*vec4(position,1.); vW = w.xyz; gl_Position = projectionMatrix*viewMatrix*w; }`,
       fragmentShader: `
         uniform float uTime; uniform sampler2D uHeight; uniform vec3 uSun; uniform vec3 uFog; uniform float uFogNear, uFogFar;
+        uniform sampler2D uWar; uniform float uWarMix;
         varying vec3 vW;
         float hash(vec2 p){ return fract(sin(dot(p, vec2(127.1,311.7)))*43758.5453); }
         float vnoise(vec2 p){ vec2 i=floor(p), f=fract(p); f=f*f*(3.-2.*f);
@@ -263,6 +265,7 @@ export class Terrain {
           col = mix(col, vec3(0.96,0.98,1.0), clamp(foam,0.,1.)*0.85);
           float alpha = mix(0.45, 0.93, smoothstep(0.0, 3.5, depth));
           alpha = max(alpha, foam*0.9);
+          col *= mix(1.0, texture2D(uWar, clamp(uv, 0.0, 1.0)).r, uWarMix);
           float dist = length(cameraPosition - vW);
           col = mix(col, uFog, smoothstep(uFogNear, uFogFar, dist));
           gl_FragColor = vec4(col, alpha);

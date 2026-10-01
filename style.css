@@ -42,6 +42,8 @@ button { font-family: inherit; cursor: pointer; }
 .utab:hover { border-color: var(--gold); }
 .utab.on { border-color: #8fff9a; box-shadow: 0 0 10px rgba(143,255,154,.45); }
 .utab.empty { opacity: .45; }
+.utab.idle { margin-left: 8px; }
+.utab.idle.alert { border-color: #ffb27a; box-shadow: 0 0 8px rgba(255,178,122,.45); }
 #spells { display: flex; gap: 8px; padding: 10px; background: var(--panel); border: 1px solid var(--edge); border-radius: 16px; box-shadow: 0 6px 24px rgba(0,0,0,.5); }
 .spell { position: relative; width: 74px; height: 86px; border-radius: 12px; border: 1px solid rgba(241,200,106,.35); color: var(--ink);
   background: radial-gradient(circle at 50% 30%, rgba(90, 70, 40, .9), rgba(30, 20, 10, .95)); display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 2px; transition: transform .1s, box-shadow .15s; }

@@ -9,6 +9,7 @@ import { Audio } from './fx.js';
 import { makeGhost } from './models.js';
 import { SPELLS, SPELL_ORDER, BUILD, TRAIN_COST, DIFFICULTY, LAYOUT, HALF, WATER, UNIT_STATS, UNIT_TABS, TRIBE_CSS, PRAY_HEAD, PRAY_TOTEM } from './config.js';
 import { LEVELS, LEVEL_ORDER, applyLevel } from './levels.js';
+import { FN } from './fog.js';
 
 const $ = (id) => document.getElementById(id);
 const canvas = $('view'), overlay = $('overlay'), octx = overlay.getContext('2d');
@@ -16,7 +17,7 @@ const mini = $('minimap'), mctx = mini.getContext('2d');
 
 // ---------- 設定 ----------
 const params = new URLSearchParams(location.search);
-let settings = { diff: params.get('d') || 'normal', quality: params.get('q') || 'ultra', level: 'twin', sound: true, edge: true };
+let settings = { diff: params.get('d') || 'normal', quality: params.get('q') || 'ultra', level: 'twin', fog: true, sound: true, edge: true };
 try { Object.assign(settings, JSON.parse(localStorage.getItem('shaman-settings') || '{}')); } catch (e) { /* 無痕模式 */ }
 if (params.get('d')) settings.diff = params.get('d');
 if (params.get('level')) settings.level = params.get('level');
@@ -85,11 +86,27 @@ let miniImg = null, miniT = 0;
 const seed = Math.floor(Math.random() * 1e6);
 const cam = { x: 0, z: 0, y: 3, yaw: 0.6, tYaw: 0.6, dist: 150, tDist: 150 };
 const base = () => LAYOUT.bases[0];
+let rallyFlag = null;
+function makeRallyFlag() {
+  const g = new THREE.Group();
+  const pole = new THREE.Mesh(new THREE.CylinderGeometry(0.07, 0.09, 3.4, 6), new THREE.MeshStandardMaterial({ color: 0x8b6a3e, roughness: 1 }));
+  pole.position.y = 1.7; pole.castShadow = true;
+  const shape = new THREE.Shape(); shape.moveTo(0, 0); shape.lineTo(1.5, -0.45); shape.lineTo(0, -0.9); shape.closePath();
+  const cloth = new THREE.Mesh(new THREE.ShapeGeometry(shape), new THREE.MeshStandardMaterial({ color: TRIBE_CSS[0], side: THREE.DoubleSide, emissive: 0x113366 }));
+  cloth.position.set(0.05, 3.35, 0); cloth.castShadow = true;
+  const base = new THREE.Mesh(new THREE.CylinderGeometry(0.5, 0.6, 0.18, 12), new THREE.MeshStandardMaterial({ color: 0x777066, roughness: 1 }));
+  base.position.y = 0.09;
+  g.add(pole, cloth, base);
+  g.userData.cloth = cloth;
+  return g;
+}
 // 建立（或切換關卡時重建）整個世界
 function newWorld(levelId) {
   applyLevel(levelId);
   buildScene();
-  game = new Game(scene, audio, { seed, diff: DIFFICULTY[settings.diff] || DIFFICULTY.normal });
+  game = new Game(scene, audio, { seed, diff: DIFFICULTY[settings.diff] || DIFFICULTY.normal, fog: settings.fog });
+  game.fog.patchScene(scene);
+  rallyFlag = makeRallyFlag(); rallyFlag.visible = false; scene.add(rallyFlag);
   if (renderPass) renderPass.scene = scene;
   miniImg = null;
   cam.x = base().x + 8; cam.z = base().z - 6;
@@ -143,7 +160,7 @@ function pickGround(sx, sy) {
 function pickUnit(sx, sy, filter) {
   let best = null, bd = 24;
   for (const u of game.units) {
-    if (!u.alive || (filter && !filter(u))) continue;
+    if (!u.alive || !u.model.root.visible || (filter && !filter(u))) continue;
     const s = toScreen(u.pos.x, u.pos.y + 1.1 * u.stats.scale, u.pos.z);
     if (!s.ok) continue;
     const d = Math.hypot(s.x - sx, s.y - sy) - (u.tribe === 0 ? 4 : 0);
@@ -154,7 +171,7 @@ function pickUnit(sx, sy, filter) {
 function pickObject(sx, sy, gp) {
   let best = null, bd = 1e9;
   for (const b of [...game.buildings, ...game.heads]) {
-    if (!b.alive) continue;
+    if (!b.alive || !b.model.root.visible) continue;
     let d = gp ? Math.hypot(gp.x - b.pos.x, gp.z - b.pos.z) - b.radius - 0.8 : 1e9;
     const s = toScreen(b.pos.x, b.pos.y + 2.5, b.pos.z);
     if (s.ok && Math.hypot(s.x - sx, s.y - sy) < 34) d = Math.min(d, -0.5 + Math.hypot(s.x - sx, s.y - sy) / 100);
@@ -195,7 +212,10 @@ function formation(units, x, z, orderFn) {
 }
 function command(sx, sy) {
   const mine = selection.filter((u) => u.alive);
-  if (!mine.length) return;
+  if (!mine.length) {
+    if (isMyWarriorHut(selObj)) { const gp = pickGround(sx, sy); if (gp) setRally(selObj, gp); }
+    return;
+  }
   const h = hoverAt(sx, sy);
   const followers = mine.filter((u) => u.isFollower);
   const braves = mine.filter((u) => u.type === 'brave');
@@ -255,9 +275,23 @@ function enterBuild(type) {
   if (game.tribes[0].wood < BUILD[type].wood) { game.msg(`木材不足：${BUILD[type].name} 需要 ${BUILD[type].wood} 木材`); audio.play('error'); return; }
   cancelMode();
   const ghost = makeGhost(type);
+  ghost.userData.mat.userData.warFog = 'skip';
   scene.add(ghost);
   mode = { kind: 'build', type, ghost };
 }
+function isMyWarriorHut(o) { return o && o.alive && o.kind === 'building' && o.tribe === 0 && o.type === 'warriorhut'; }
+function setRally(hut, gp) {
+  if (!game.terrain.walkable(gp.x, gp.z)) { game.msg('集結點必須在可行走的陸地上'); audio.play('error'); return; }
+  hut.rally = { x: gp.x, z: gp.z };
+  ping(gp.x, gp.z, '#5ab0ff'); audio.play('order');
+  game.msg('🚩 集結點已設定：新訓練的戰士會自動前往');
+}
+function enterRally() {
+  if (!isMyWarriorHut(selObj)) return;
+  cancelMode();
+  mode = { kind: 'rally', hut: selObj };
+}
+function clearRally() { if (isMyWarriorHut(selObj)) { selObj.rally = null; audio.play('order'); } }
 function cancelMode() {
   if (mode && mode.ghost) scene.remove(mode.ghost);
   mode = null;
@@ -324,6 +358,16 @@ function selectTab(type, add) {
   if (type === 'shaman' && !add) { selectShaman(); return; }
   const list = game.units.filter((u) => u.alive && u.tribe === 0 && u.type === type);
   if (!list.length) { game.msg(`目前沒有${UNIT_STATS[type].name}`); audio.play('error'); return; }
+  selectGroup(type, list, add);
+}
+// 閒置勇者：沒有工作（手動指令做完、或附近沒樹可砍）超過 1.5 秒的勇者
+function idleBraves() { return game.units.filter((u) => u.alive && u.tribe === 0 && u.type === 'brave' && u.ord.type === 'idle' && game.time - u.idleSince > 1.5); }
+function selectIdle(add) {
+  const list = idleBraves();
+  if (!list.length) { game.msg('沒有閒置的勇者'); audio.play('error'); return; }
+  selectGroup('idle', list, add);
+}
+function selectGroup(type, list, add) {
   const now = performance.now(), again = lastTab.type === type && now - lastTab.t < 450;
   lastTab = { type, t: now };
   setSel(list, add);
@@ -349,6 +393,7 @@ canvas.addEventListener('pointerdown', (e) => {
   if (e.button !== 0) return;
   if (mode && mode.kind === 'cast') { doCast(pickGround(e.clientX, e.clientY)); return; }
   if (mode && mode.kind === 'build') { doBuild(pickGround(e.clientX, e.clientY)); return; }
+  if (mode && mode.kind === 'rally') { const gp = pickGround(e.clientX, e.clientY), hut = mode.hut; cancelMode(); if (gp && hut.alive) setRally(hut, gp); return; }
   mouse.down = true; mouse.sx = e.clientX; mouse.sy = e.clientY; mouse.drag = false;
   canvas.setPointerCapture(e.pointerId);
 });
@@ -405,6 +450,7 @@ window.addEventListener('keydown', (e) => {
   if (sp) { enterCast(sp); return; }
   const tab = !e.ctrlKey && UNIT_TABS.find((t) => UNIT_STATS[t].tab.key === k);
   if (tab) { selectTab(tab, e.shiftKey); return; }
+  if (k === 'x' && !e.ctrlKey) { selectIdle(e.shiftKey); return; }
   if (k === ' ') { e.preventDefault(); selectShaman(); }
   else if (k === 'b') enterBuild('hut');
   else if (k === 'v') enterBuild('warriorhut');
@@ -478,6 +524,13 @@ for (const type of UNIT_TABS) {
   tabBox.appendChild(b);
   tabBtns[type] = b;
 }
+const idleBtn = document.createElement('button');
+idleBtn.className = 'utab idle';
+idleBtn.innerHTML = `<span class="hk">X</span><span class="ic">💤</span><span class="nm">閒置勇者</span><b class="n">0</b>`;
+idleBtn.onclick = (e) => { audio.init(); selectIdle(e.shiftKey); };
+idleBtn.onmouseenter = () => showTip(idleBtn, () => '<b>💤 閒置勇者</b>（X）<br>勇者平常會自動伐木、建造；下過手動指令（移動、祈禱結束等）或附近沒樹可砍時會閒置。<br>選取後按 G 讓他們回去自動工作 · 連按兩下移動鏡頭');
+idleBtn.onmouseleave = hideTip;
+tabBox.appendChild(idleBtn);
 const tip = $('tooltip');
 let tipFn = null, tipEl = null;
 function showTip(el, fn) { tipEl = el; tipFn = fn; tip.style.display = 'block'; updateTip(); }
@@ -520,9 +573,16 @@ function buildPanel() {
       info = `<h3>${o.tribe === 1 ? '敵方 ' : ''}${st.name}</h3>${hpBar(o)}`;
       if (!o.complete) info += `建造中 ${Math.floor(o.progress * 100)}%`;
       else if (o.type === 'hut') info += `每 26 秒產生一名勇者 · 人口 ${game.popOf(o.tribe)}/${game.capOf(o.tribe)}`;
-      else if (o.type === 'warriorhut') info += `訓練佇列：${o.trainQ}${o.trainQ ? `（${Math.floor(o.trainT / 5 * 100)}%）` : ''}`;
+      else if (o.type === 'warriorhut') {
+        info += `訓練佇列：${o.trainQ}${o.trainQ ? `（${Math.floor(o.trainT / 5 * 100)}%）` : ''}`;
+        if (o.tribe === 0) info += `<br><small>🚩 集結點：${o.rally ? '已設定' : '未設定'} · 選取訓練所後右鍵地面即可設定</small>`;
+      }
       else if (o.type === 'totem') info += `祈禱者 ${o.prayers} 名 · 薩滿重生點<br><small>在圖騰祈禱會平均補充所有未滿的法術</small>`;
       if (o.type === 'warriorhut' && o.tribe === 0 && o.complete) acts.push(act('🗡 訓練戰士', `${TRAIN_COST} 木 (R)`, trainWarrior, tr.wood < TRAIN_COST));
+      if (o.type === 'warriorhut' && o.tribe === 0) {
+        acts.push(act('🚩 集結點', '點地面 / 右鍵', enterRally, false, '設定新戰士訓練完成後自動前往的位置'));
+        if (o.rally) acts.push(act('✖ 取消集結', '', clearRally, false));
+      }
     } else if (o.kind === 'unit') {
       info = `<h3>${o.tribe === 2 ? '野人' : '敵方 ' + UNIT_STATS[o.type].name}</h3>${hpBar(o)}${o.tribe === 2 ? '使用「感化」將他們轉化為子民' : ''}`;
     }
@@ -547,7 +607,7 @@ function buildPanel() {
     box.innerHTML = '';
     for (const a of acts) {
       const b = document.createElement('button');
-      b.className = 'act' + (mode && mode.kind === 'build' && a.label.includes(BUILD[mode.type].name.slice(-3)) ? ' on' : '');
+      b.className = 'act' + ((mode && mode.kind === 'build' && a.label.includes(BUILD[mode.type].name.slice(-3))) || (mode && mode.kind === 'rally' && a.label.includes('集結點')) ? ' on' : '');
       b.innerHTML = `${a.label}<small>${a.sub}</small>`;
       b.disabled = !!a.disabled;
       b.onclick = () => { audio.init(); a.fn(); };
@@ -574,6 +634,10 @@ function updateUI(dt) {
     b.classList.toggle('empty', !n);
     b.classList.toggle('on', selTypes.has(type));
   }
+  const nIdle = idleBraves().length;
+  idleBtn.querySelector('.n').textContent = nIdle;
+  idleBtn.classList.toggle('empty', !nIdle);
+  idleBtn.classList.toggle('alert', nIdle > 0);
   const t = Math.floor(game.time);
   $('clock').textContent = `${Math.floor(t / 60)}:${String(t % 60).padStart(2, '0')}`;
   for (const id of SPELL_ORDER) {
@@ -632,7 +696,7 @@ function drawOverlay() {
   octx.font = '600 13px "Noto Sans TC", sans-serif'; octx.textAlign = 'center';
   // 單位血條
   for (const u of game.units) {
-    if (!u.alive) continue;
+    if (!u.alive || !u.model.root.visible) continue;
     const show = u.selected || game.time - u.lastHurt < 3 || (u.type === 'shaman');
     if (!show) continue;
     const s = toScreen(u.pos.x, u.pos.y + 2.3 * u.stats.scale, u.pos.z);
@@ -650,7 +714,7 @@ function drawOverlay() {
   }
   // 建築
   for (const b of game.buildings) {
-    if (!b.alive) continue;
+    if (!b.alive || !b.model.root.visible) continue;
     const s = toScreen(b.pos.x, b.pos.y + (b.type === 'totem' ? 8 : 6), b.pos.z);
     if (!s.ok) continue;
     if (!b.complete) { bar(s.x, s.y, 50, b.progress, '#e8c27a', 6); }
@@ -719,6 +783,18 @@ function drawOverlay() {
       octx.fillStyle = c; octx.fillText(`${sp.icon} ${sp.name}${inR ? '' : '（薩滿將移動）'}`, m.x, m.y - 10);
     }
   }
+  // 集結點
+  const rh = mode && mode.kind === 'rally' ? mode.hut : isMyWarriorHut(selObj) ? selObj : null;
+  if (rh) {
+    const tgt = mode && mode.kind === 'rally' ? groundPt : rh.rally;
+    if (tgt) {
+      const a = toScreen(rh.pos.x, rh.pos.y + 1, rh.pos.z), b = toScreen(tgt.x, game.terrain.heightAt(tgt.x, tgt.z) + 0.5, tgt.z);
+      octx.strokeStyle = '#5ab0ff'; octx.lineWidth = 2.5; octx.setLineDash([9, 7]);
+      octx.beginPath(); octx.moveTo(a.x, a.y); octx.lineTo(b.x, b.y); octx.stroke(); octx.setLineDash([]);
+      circleWorld(tgt.x, tgt.z, 1.4, '#5ab0ff', 2);
+      if (mode && mode.kind === 'rally') { octx.fillStyle = '#9fd0ff'; octx.fillText('🚩 點擊設定集結點', b.x, b.y - 52); }
+    }
+  }
   if (mode && mode.kind === 'build' && groundPt) {
     const ok = game.canPlace(mode.type, groundPt.x, groundPt.z);
     circleWorld(groundPt.x, groundPt.z, BUILD[mode.type].radius + 0.4, ok ? '#8fff9a' : '#ff5a4a', 2.5);
@@ -732,6 +808,7 @@ function drawOverlay() {
 }
 
 // ---------- 小地圖 ----------
+let fogCan = null, fogImg = null;
 function drawMinimap(dt) {
   const S = mini.width;
   miniT -= dt;
@@ -749,19 +826,27 @@ function drawMinimap(dt) {
   mctx.imageSmoothingEnabled = true;
   mctx.drawImage(miniImg, 0, 0, S, S);
   const P = (x, z) => [(x / (HALF * 2) + 0.5) * S, (z / (HALF * 2) + 0.5) * S];
+  // 迷霧
+  const fog = game.fog;
+  if (fog.enabled && started) {
+    if (!fogCan) { fogCan = document.createElement('canvas'); fogCan.width = fogCan.height = FN; fogImg = fogCan.getContext('2d').createImageData(FN, FN); }
+    for (let k = 0; k < FN * FN; k++) fogImg.data[k * 4 + 3] = (1 - fog.cur[k]) * 170;
+    fogCan.getContext('2d').putImageData(fogImg, 0, 0);
+    mctx.drawImage(fogCan, 0, 0, S, S);
+  }
   for (const h of game.heads) {
     const [x, y] = P(h.pos.x, h.pos.z);
     mctx.fillStyle = game.tribes[0].unlocked.has(h.spell) ? '#9ef0ff' : '#ffe28a';
     mctx.beginPath(); mctx.arc(x, y, 6, 0, 7); mctx.fill(); mctx.strokeStyle = '#000'; mctx.lineWidth = 1.5; mctx.stroke();
   }
   for (const b of game.buildings) {
-    if (!b.alive) continue;
+    if (!b.alive || !b.model.root.visible) continue;
     const [x, y] = P(b.pos.x, b.pos.z), r = b.type === 'totem' ? 9 : 6;
     mctx.fillStyle = TRIBE_CSS[b.tribe]; mctx.fillRect(x - r, y - r, r * 2, r * 2);
     mctx.strokeStyle = '#fff'; mctx.lineWidth = b.type === 'totem' ? 2 : 1; mctx.strokeRect(x - r, y - r, r * 2, r * 2);
   }
   for (const u of game.units) {
-    if (!u.alive) continue;
+    if (!u.alive || !u.model.root.visible) continue;
     const [x, y] = P(u.pos.x, u.pos.z);
     mctx.fillStyle = u.tribe === 2 ? '#e8d8b0' : u.selected ? '#aaffaa' : TRIBE_CSS[u.tribe];
     const r = u.type === 'shaman' ? 5 : 3;
@@ -828,6 +913,30 @@ function updateCamera(dt) {
   sun.position.copy(sun.target.position).addScaledVector(sunDir, 180);
 }
 
+// ---------- 戰爭迷霧 ----------
+let fogPatchT = 0;
+function applyFog(dt) {
+  const f = game.fog, on = started && f.enabled;
+  f.uMix.value = on ? 1 : 0;
+  fogPatchT -= dt || 0.016;
+  if (fogPatchT <= 0) { fogPatchT = 0.5; f.patchScene(scene); }   // 新生成的單位、建築、特效
+  for (const u of game.units) if (u.tribe !== 0) u.model.root.visible = !on || f.visible(u.pos.x, u.pos.z);
+  for (const b of game.buildings) {
+    if (b.tribe === 0) continue;
+    if (on && f.visible(b.pos.x, b.pos.z)) b.seen = true;   // 建築一旦看過就會留在畫面上
+    b.model.root.visible = !on || !!b.seen;
+  }
+  if (selObj && selObj.model && !selObj.model.root.visible) { selObj.selected = false; selObj = null; }
+  // 集結旗
+  const rh = mode && mode.kind === 'rally' ? mode.hut : isMyWarriorHut(selObj) ? selObj : null;
+  const tgt = rh && (mode && mode.kind === 'rally' ? groundPt : rh.rally);
+  rallyFlag.visible = !!tgt;
+  if (tgt) {
+    rallyFlag.position.set(tgt.x, Math.max(game.terrain.heightAt(tgt.x, tgt.z), WATER), tgt.z);
+    rallyFlag.userData.cloth.rotation.y = Math.sin(performance.now() / 300) * 0.25;
+  }
+}
+
 // ---------- 主迴圈 ----------
 let last = performance.now();
 function frame(now) {
@@ -838,6 +947,7 @@ function frame(now) {
   updateCamera(Math.min(0.05, (now - (frame.prev || now)) / 1000) || 0.016);
   frame.prev = now;
   if (started && !paused) game.update(dt);
+  applyFog(dt);
   game.terrain.waterUniforms.uTime.value += dt || (started ? 0 : 0.016);
   if (started) {
     if (mouse.in) {
@@ -873,6 +983,8 @@ segment('diffSeg', 'diff'); segment('qualSeg', 'quality');
 $('chkSound').checked = settings.sound; $('chkEdge').checked = settings.edge;
 $('chkSound').onchange = (e) => { settings.sound = e.target.checked; saveSettings(); if (audio.master) audio.master.gain.value = settings.sound ? audio.vol : 0; };
 $('chkEdge').onchange = (e) => { settings.edge = e.target.checked; saveSettings(); };
+$('chkFog').checked = settings.fog;
+$('chkFog').onchange = (e) => { settings.fog = e.target.checked; saveSettings(); newWorld(settings.level); };
 
 function startGame() {
   audio.init();
@@ -881,6 +993,7 @@ function startGame() {
   $('start').classList.add('hidden'); $('hud').classList.remove('hidden');
   started = true;
   cam.x = base().x + 6; cam.z = base().z + 4; cam.tDist = 70; cam.tYaw = Math.round(cam.yaw / (Math.PI * 2)) * Math.PI * 2 + 0.5;
+  game.fog.update(0, game, true);
   game.msg(`${LAYOUT.icon} ${LAYOUT.name}——歡迎，${game.tribes[0].name} 的薩滿！`, '#ffe28a');
   game.msg('法術有使用次數：選取子民右鍵該法術的「石像」祈禱來補充', '#bfe0ff');
   game.msg('右鍵尚未解鎖的石像祈禱可獲得新法術 · Z/X/C 快速選取兵種', '#bfe0ff');

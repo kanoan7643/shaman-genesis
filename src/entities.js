@@ -26,7 +26,7 @@ export class Unit {
     this.animT = Math.random() * 10; this.swingT = 0; this.castT = 0;
     this.alive = true; this.removed = false; this.selected = false; this.lastHurt = -99; this.drownT = 0;
     this.flung = false; this.spin = 0; this.deadT = 0;
-    this.home = { x, z };
+    this.home = { x, z }; this.idleSince = game.time;
     const m = makeUnitModel(type, tribe, s.scale);
     this.model = m;
     game.scene.add(m.root);
@@ -37,6 +37,7 @@ export class Unit {
 
   setOrder(o, manual) {
     if (!this.alive || this.flung) { if (this.flung) this.pendingOrd = o; return; }
+    if (o.type === 'idle' && this.ord.type !== 'idle') this.idleSince = this.game.time;
     this.ord = o; this.path = null; this.dest = null; this.workT = 0; this.castT = 0; this.pathFailed = false;
     if (manual !== undefined) this.manual = manual;
   }
@@ -457,7 +458,7 @@ export class Building {
           const d = this.door();
           const u = g.spawnUnit('warrior', this.tribe, d.x, d.z);
           g.fx.poof(d.x, gh, d.z, 0xe0d0b0);
-          if (this.tribe === 0) { g.sfx('done', this.pos); if (g.rally) u.setOrder({ type: 'move', x: g.rally.x, z: g.rally.z }, true); }
+          if (this.tribe === 0) { g.sfx('done', this.pos); if (this.rally) u.setOrder({ type: 'move', x: this.rally.x, z: this.rally.z }, true); }
         }
       }
     }

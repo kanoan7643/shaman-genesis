@@ -62,6 +62,7 @@
           <div class="seg" id="qualSeg">
             <button data-v="ultra" class="on">極致高清</button><button data-v="high">高</button><button data-v="perf">效能</button>
           </div></div>
+        <label class="chk"><input type="checkbox" id="chkFog" checked> 戰爭迷霧（視野外看不到敵人）</label>
       </div>
       <button id="btnStart" class="big">開始征戰</button>
       <details>
@@ -69,7 +70,9 @@
         <div class="help">
           <p><b>鏡頭</b>：WASD / 方向鍵 / 滑鼠移到畫面邊緣 平移 · Q/E 或 中鍵拖曳 旋轉 · 滾輪縮放</p>
           <p><b>選取</b>：左鍵點選 / 拖曳框選 · Shift 加選 · 雙擊選同類 · Ctrl+A 全選部隊</p>
-          <p><b>兵種分頁</b>：Z 薩滿（或空白鍵）· X 勇者 · C 戰士 · 連按兩下鏡頭移到該部隊 · Shift 加選</p>
+          <p><b>兵種分頁</b>：Z 薩滿（或空白鍵）· C 戰士 · X 閒置勇者 · 連按兩下鏡頭移到該部隊 · Shift 加選</p>
+          <p><b>集結點</b>：選取戰士訓練所後右鍵地面（或按「🚩 集結點」），新訓練的戰士會自動前往</p>
+          <p><b>戰爭迷霧</b>：地形全部看得到，但子民與建築視野外的地方會變暗、看不到敵人；敵方建築看過一次後會留在地圖上</p>
           <p><b>指令</b>：右鍵地面 移動 · 右鍵敵人 攻擊 · 右鍵樹 伐木 · 右鍵工地 建造 · 右鍵 <b>石像 / 圖騰 祈禱</b> · 右鍵訓練所 送勇者受訓</p>
           <p><b>法術</b>：按 1–7 或點法術按鈕，再左鍵點目標施放（Shift 連續施放，右鍵取消）</p>
           <p><b>彈藥</b>：每個法術有使用次數，越強的法術次數越少。子民在該法術的 <b>石像</b> 祈禱可補充次數，在 <b>靈魂圖騰</b> 祈禱則平均補充所有法術；祈禱的人越多越快，越強的法術需要越久。</p>

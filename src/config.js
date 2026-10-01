@@ -11,9 +11,10 @@ export const TRIBE_CSS = ['#3d8dff', '#ff4a3a', '#b08b5e'];
 export const TRIBE_NAMES = ['藍月部族', '赤焰部族', '野人'];
 
 // tab：單位分頁（快捷鍵選取）。新增兵種時加上 tab 即會自動出現在分頁列
+// （X 已用於「閒置勇者」，新兵種請用其他按鍵）
 export const UNIT_STATS = {
   shaman:  { hp: 260, dmg: 9,  speed: 7.2, range: 1.9, rate: 1.0, aggro: 6,  name: '薩滿', scale: 1.5,  tab: { key: 'z', label: 'Z', icon: '🧙' } },
-  brave:   { hp: 60,  dmg: 5,  speed: 6.0, range: 1.7, rate: 1.0, aggro: 6,  name: '勇者', scale: 1.25, tab: { key: 'x', label: 'X', icon: '🧑' } },
+  brave:   { hp: 60,  dmg: 5,  speed: 6.0, range: 1.7, rate: 1.0, aggro: 6,  name: '勇者', scale: 1.25 },
   warrior: { hp: 170, dmg: 15, speed: 6.4, range: 1.9, rate: 0.9, aggro: 13, name: '戰士', scale: 1.4,  tab: { key: 'c', label: 'C', icon: '🗡️' } },
   wild:    { hp: 40,  dmg: 0,  speed: 3.0, range: 1.5, rate: 1.5, aggro: 0,  name: '野人', scale: 1.15 },
 };

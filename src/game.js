@@ -8,6 +8,7 @@ import { findPath } from './path.js';
 import { castSpell } from './spells.js';
 import { AI } from './ai.js';
 import { FX } from './fx.js';
+import { WarFog } from './fog.js';
 import { mulberry32, lerp } from './noise.js';
 
 export class Game {
@@ -19,7 +20,7 @@ export class Game {
     this.units = []; this.buildings = []; this.heads = []; this.effects = [];
     this.pathQueue = []; this.messages = []; this.floats = []; this.pings = [];
     this.shakeAmt = 0; this.camTarget = { x: 0, z: 0 }; this.hearDist = 120;
-    this.over = null; this.rally = null;
+    this.over = null;
     this.terrain = new Terrain(scene, opts.seed);
     this.fx = new FX(scene);
     this.forest = new Forest(scene);
@@ -36,6 +37,9 @@ export class Game {
     });
     this.setup();
     this.ai = new AI(this, 1, d);
+    this.fog = new WarFog(opts.fog !== false);
+    this.terrain.waterUniforms.uWar = this.fog.uTex; this.terrain.waterUniforms.uWarMix = this.fog.uMix;
+    this.fog.update(0, this, true);
   }
 
   setup() {
@@ -324,6 +328,7 @@ export class Game {
     this.effects = this.effects.filter((e) => e.update(dt));
     this.updateTrees(dt);
     this.ai.update(dt);
+    this.fog.update(dt, this);
     this.fx.update(dt);
     this.units = this.units.filter((u) => !u.removed || u.alive);
     this.buildings = this.buildings.filter((b) => !b.removed);
